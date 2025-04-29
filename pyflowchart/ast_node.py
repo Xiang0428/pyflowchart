@@ -43,6 +43,9 @@ class AstNode(Node):
     def __init__(self, ast_object: _ast.AST, **kwargs):
         Node.__init__(self)
         self.ast_object = ast_object
+        # 將程式碼行號記錄到節點參數，供前端高亮使用
+        if hasattr(self.ast_object, 'lineno'):
+            self.set_param('code_line', str(self.ast_object.lineno))
 
     def ast_to_source(self) -> str:
         """
@@ -64,6 +67,9 @@ class AstConditionNode(AstNode, ConditionNode):
         """
         AstNode.__init__(self, ast_cond, **kwargs)
         ConditionNode.__init__(self, cond=self.cond_expr())
+        # 重新設定 code_line，因 ConditionNode.__init__ 重置 params
+        if hasattr(self.ast_object, 'lineno'):
+            self.set_param('code_line', str(self.ast_object.lineno))
 
     def cond_expr(self) -> str:
         """
@@ -498,13 +504,12 @@ class If(NodesGroup, AstNode):
 ####################
 
 class CommonOperation(AstNode, OperationNode):
-    """
-    CommonOperation is an OperationNode for any _ast.AST (any sentence in python source code)
-    """
-
     def __init__(self, ast_object: _ast.AST, **kwargs):
         AstNode.__init__(self, ast_object, **kwargs)
         OperationNode.__init__(self, operation=self.ast_to_source())
+        # 由於 OperationNode.__init__ 會重設 params，需要再次設定 code_line
+        if hasattr(self.ast_object, 'lineno'):
+            self.set_param('code_line', str(self.ast_object.lineno))
 
 
 class CallSubroutine(AstNode, SubroutineNode):
@@ -880,7 +885,7 @@ class Match(NodesGroup, AstNode):
 #       match b:
 #         ^
 #     SyntaxError: invalid syntax
-# So, this is in vain.
+#     So, this is in vain.
 if sys.version_info < (3, 10):
     Match = CommonOperation
 
@@ -947,24 +952,54 @@ def parse(ast_list: List[_ast.AST], **kwargs) -> ParseProcessGraph:
     process = ParseProcessGraph(head_node, tail_node)
 
     for ast_object in ast_list:
-        # ast_node_class: some special AstNode subclass or CommonOperation by default.
-        ast_node_class = __special_stmts.get(type(ast_object), CommonOperation)
+        node = None # Initialize node
 
-        # special case:  Match for Python 3.10+
-        if sys.version_info >= (3, 10) and type(ast_object) == _ast_Match_t:
-            ast_node_class = Match
+        # >>> START MODIFICATION <<<
+        # Special case: Standalone input() call
+        if isinstance(ast_object, _ast.Expr) and \
+           isinstance(ast_object.value, _ast.Call) and \
+           isinstance(ast_object.value.func, _ast.Name) and \
+           ast_object.value.func.id == 'input':
+            # Create InputOutputNode directly for standalone input()
+            content = astunparse.unparse(ast_object.value).strip()
+            node = InputOutputNode(InputOutputNode.INPUT, content)
+            # Manually set code_line as InputOutputNode.__init__ might reset params
+            if hasattr(ast_object, 'lineno'):
+                node.set_param('code_line', str(ast_object.lineno))
+        # >>> END MODIFICATION <<<
 
-        # special case: special stmt as a expr value. e.g. function call
-        if type(ast_object) == _ast.Expr:
-            if hasattr(ast_object, "value"):
-                ast_node_class = __special_stmts.get(type(ast_object.value), CommonOperation)
-            else:  # ast_object has no value attribute
-                ast_node_class = CommonOperation
+        else:
+            # Original logic for other AST types
+            ast_node_class = __special_stmts.get(type(ast_object), CommonOperation)
 
-        assert issubclass(ast_node_class, AstNode)
+            # special case: Match for Python 3.10+
+            if sys.version_info >= (3, 10) and type(ast_object) == _ast_Match_t:
+                ast_node_class = Match
 
-        node = ast_node_class(ast_object, **kwargs)
+            # special case: other special stmts as expr values (e.g., print())
+            if type(ast_object) == _ast.Expr:
+                if hasattr(ast_object, "value"):
+                    value_type = type(ast_object.value)
+                    if value_type in __special_stmts:
+                         # Use the specific class for the value (e.g., CallSubroutine for print())
+                         node = __special_stmts[value_type](ast_object.value, **kwargs)
+                         # Add code_line from the parent Expr node
+                         if hasattr(ast_object, 'lineno'):
+                             node.set_param('code_line', str(ast_object.lineno))
+                    else: # Fallback to CommonOperation for the Expr
+                        ast_node_class = CommonOperation
+                        node = ast_node_class(ast_object, **kwargs)
+                else:  # ast_object has no value attribute
+                    ast_node_class = CommonOperation
+                    node = ast_node_class(ast_object, **kwargs)
+            else: # Not an Expr, use the determined class
+                 node = ast_node_class(ast_object, **kwargs)
 
+        # Ensure node is created (fallback)
+        if node is None:
+             node = CommonOperation(ast_object, **kwargs)
+
+        # Connect nodes
         if head_node is None:  # is the first node
             head_node = node
             tail_node = node

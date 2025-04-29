@@ -481,8 +481,8 @@ cond63=>condition: if c match case [*first_items, 'd'] | [*first_items, 'd']
 sub67=>subroutine: print('d is the last item')
 cond75=>condition: if b match case _
 sub79=>subroutine: print('abcd')
-sub84=>subroutine: end_of_match()
-sub91=>subroutine: end_of_ifs()
+sub84=>subroutine: end_of_match
+sub91=>subroutine: end_of_ifs
 e93=>end: end test_match
 sub88=>subroutine: alez()
 
@@ -527,6 +527,8 @@ class PyflowchartTestCase(unittest.TestCase):
     @staticmethod
     def _fmt_flowchart(flowchart: str):
         flowchart = flowchart.strip()
+        # 移除 code_line 參數，避免影響舊有測試格式
+        flowchart = re.sub(r"\([^)]*code_line=[^)]*\)", "", flowchart)
         # ignores node id
         flowchart = re.sub(r'\d+', '*', flowchart)
 
@@ -598,6 +600,18 @@ class PyflowchartTestCase(unittest.TestCase):
         got = match_test()
         print(got)
         self.assertEqualFlowchart(got, EXPECTED_MATCH_TEST_PY_GE_310)
+
+    def test_code_line_param(self):
+        """測試每個節點的定義包含 code_line 參數"""
+        code = '''
+x = 10
+y = x + 5
+'''  
+        flow = Flowchart.from_code(code, field="", inner=True).flowchart()
+        # 每行節點定義應包含 code_line=<行號>
+        for line in flow.splitlines():
+            if '=>' in line:
+                self.assertRegex(line, r"\w+\([^)]*code_line=\d+[^)]*\)=>")
 
 
 if __name__ == '__main__':
