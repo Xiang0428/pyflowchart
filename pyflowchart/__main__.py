@@ -7,6 +7,7 @@ license that can be found in the LICENSE file.
 """
 
 import argparse
+import sys  # ensure utf-8 stdout support
 from typing import Optional
 
 import chardet
@@ -62,18 +63,20 @@ def output(flowchart_str: str, file_name: Optional[str], field: str) -> None:
                     - '*.html' or '*.htm' for HTML.
         field: the field of flowchart.
     """
-    if not file_name:  # stdout
-        print(flowchart_str)
+    if not file_name:  # stdout, write utf-8 bytes
+        sys.stdout.buffer.write(flowchart_str.encode('utf-8'))
+        sys.stdout.buffer.write(b"\n")
         return
 
     ext = file_name.split('.')[-1]
 
     if ext in ['html', 'htm']:
         output_html(output_name=file_name, field_name=field, flowchart=flowchart_str)
-    else:  # not supported
-        print(flowchart_str)
-        print(f'\n*** Error: {ext} is not a supported output file format.\n' +
-              f'    Currently only .htm or .html are supported.')  # TODO: stderr
+    else:
+        # write plain DSL to file using utf-8 encoding
+        with open(file_name, 'w', encoding='utf-8') as f:
+            f.write(flowchart_str)
+        print(f"Saved DSL to {file_name} with utf-8 encoding")
 
 
 def main(code_file, field, inner, output_file, simplify, conds_align):

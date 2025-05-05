@@ -52,6 +52,6 @@ a=int(input())
 s=1
 for i in range(1,a+1):
     s=s*i
-print(s)
+print("hello你好嗎")
 '''
     show_flow(code5, "Factorial Calculation")
